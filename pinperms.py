@@ -246,12 +246,46 @@ def quadrant(word: str, ind: int) -> str:
     if word[ind] in QUADS:
         return word[ind]
     elif word[ind-1] in QUADS:
-        return M_to_SP(SP_to_M(word[ind-1:ind+1])[1:])
+        return M_to_SP(SP_to_M(word[ind-1:ind+1])[0][1:])
     else:
         return M_to_SP(word[ind-1:ind+1])
 
 
+def pinword_occurrences_SP(w: str, u: str, start_index: int=0) -> Iterator[int]:
+    """
+    Yields all occurrences (starting indices) of strict pinword u in pinword w (Lemma 3.12)
+    """
+    k = len(u)
+    for i in range(start_index, len(w)):
+        if quadrant(w, i) == quadrant(u, 0) and w[i+1:i+k] == u[1:]:
+            yield i
+
+def pinword_contains_SP(w: str, u: str) -> bool:
+    return next(pinword_occurrences_SP(u, w), False) != False
+
+def pinword_occurrences(w: str, u: str) -> Iterator[Tuple[int]]:
+    """
+    Yields all occurrences (starting indices of pinword u in pinword w (Theorem 3.13)
+    """
+    def rec(w: str, u: List[str], i: int, j: int, res: List[int]) -> bool:
+        """
+        Recursive helper function used to check for multiple sequential occurrences.
+        """
+        if j == len(u):
+            yield tuple(res)
+        elif i >= len(w):
+            return
+        else:
+            for occ in pinword_occurrences_SP(w, u[j], i):
+                res.append(occ)
+                for x in rec(w, u, occ+len(u[j]), j+1, res):
+                    yield x
+                res.pop()
+    return rec(w, factor_pinword(u), 0, 0, [])
+
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
-    print(SP_to_M(
+    for x in pinword_occurrences("2RU4LULURD4L", "14L2UR"):
+        print(x)
+    
