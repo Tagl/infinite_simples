@@ -50,7 +50,7 @@ def pinword_to_perm(word: str) -> "Perm":
     def max_y(p):
         return max(p, key=lambda x: x[1])[1]
     # Go through each character handling the different cases
-    # For numbers we add a point in one of 4 corners
+    # For numbers we add a point in one of 4 quadrants
     # - 1: Northeast
     # - 2: Northwest
     # - 3: Southwest
@@ -125,7 +125,7 @@ def pinword_to_perm(word: str) -> "Perm":
     perm = tuple(bisect_left(sp, x[1]) for x in p)
     return Perm(perm)
 
-def pinwords_of_length(n: int):
+def pinwords_of_length(n: int) -> Iterator[str]:
     """
     Generates all pinwords of length n.
     Note that pinwords cannot contain any occurrence of:
@@ -145,15 +145,29 @@ def pinwords_of_length(n: int):
                 yield word + c
 
 @lru_cache(maxsize=None)
-def pinword_to_perm_mapping(n: int):
+def pinword_to_perm_mapping(n: int) -> Dict:
     return {pinword:pinword_to_perm(pinword) for pinword in pinwords_of_length(n)}
 
 @lru_cache(maxsize=None)
-def perm_to_pinword_mapping(n: int):
+def perm_to_pinword_mapping(n: int) -> Dict:
     res = defaultdict(set)
     for k,v in pinword_to_perm_mapping(n).items():
         res[v].add(k)
     return res
+
+def is_strict_pinword(w: str) -> bool:
+    """
+    Returns True if w is a strict pinword, False otherwise
+    """
+    if w == "":
+        return True # paper does not mention the empty pinword
+    return w[0] in QUADS and all(w[i] in DIRS for i in range(1, len(w)))
+
+@lru_cache(maxsize=None)
+def perm_to_strict_pinword_mapping(n: int) -> Dict:
+    original = perm_to_pinword_mapping(n)
+    filtered = {k:{x for x in v if is_strict_pinword(x)} for k,v in original.items()}
+    return filtered
 
 def perm_to_pinword(perm: "Perm", origin) -> str:
     pass
@@ -261,7 +275,7 @@ def pinword_occurrences_SP(w: str, u: str, start_index: int=0) -> Iterator[int]:
             yield i
 
 def pinword_contains_SP(w: str, u: str) -> bool:
-    return next(pinword_occurrences_SP(u, w), False) != False
+    return next(pinword_occurrences_SP(w, u), False) != False
 
 def pinword_occurrences(w: str, u: str) -> Iterator[Tuple[int]]:
     """
@@ -283,9 +297,15 @@ def pinword_occurrences(w: str, u: str) -> Iterator[Tuple[int]]:
                 res.pop()
     return rec(w, factor_pinword(u), 0, 0, [])
 
+def pinword_contains(w: str, u: str):
+    return next(pinword_occurrences(w, u), False) != False
+
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
-    for x in pinword_occurrences("2RU4LULURD4L", "14L2UR"):
-        print(x)
+    for k,v in perm_to_pinword_mapping(3).items():
+        print(k, v)
+    print()
+    for k,v in perm_to_strict_pinword_mapping(3).items():
+        print(k, v)
     
