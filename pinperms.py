@@ -1,3 +1,7 @@
+import sys
+
+from automata.fa.dfa import DFA
+from automata.fa.nfa import NFA
 from bisect import bisect_left
 from collections import defaultdict
 from fractions import Fraction
@@ -300,12 +304,157 @@ def pinword_occurrences(w: str, u: str) -> Iterator[Tuple[int]]:
 def pinword_contains(w: str, u: str):
     return next(pinword_occurrences(w, u), False) != False
 
+def make_NFA_for_pinword(u: str) -> "NFA":
+    prefix = ""
+
+    def new_state(states):
+        states.add(prefix + str(len(states)))
+    
+    def last_state(states):
+        return prefix + str(len(states)-1)
+    
+    def add_A_star(states, transitions):
+        new_state(states)
+        s = last_state(states)
+        transitions[s] = {x:{s} for x in DIRS}
+    
+    def add_SP(u_i, states, transitions):
+        if len(u_i) == 2:
+            w1,w2 = u_i
+            state_A = last_state(states)
+            new_state(states)
+            state_B = last_state(states)
+            new_state(states)
+            state_C = last_state(states)
+            add_A_star(states, transitions)
+            state_D = last_state(states)
+
+            transitions[state_A][w1[0]].add(state_B)
+            transitions[state_A][w2[0]].add(state_C)
+            
+            transitions[state_B] = {w1[1]:{state_D}}
+            transitions[state_C] = {w2[1]:{state_D}}
+        else:
+            x, = u_i
+            at = last_state(states)
+            for i in range(len(x)):
+                c = x[i]
+                if i == len(x)-1:
+                    add_A_star(states, transitions)
+                else:
+                    new_state(states)
+                nxt = last_state(states)
+                if c in transitions[at]:
+                    transitions[at][c].add(nxt)
+                else:
+                    transitions[at][c] = {nxt}
+                at = nxt
+            
+
+    decomp = [SP_to_M(x) for x in factor_pinword(u)]
+    rev = False
+    if rev:
+        decomp = [x[::-1] for x in decomp[::-1]]
+    input_symbols = set(DIRS)
+    initial_state = "0"
+    states = set()
+    transitions = defaultdict(dict)
+    
+    add_A_star(states, transitions)
+    for u_i in decomp:
+        add_SP(u_i, states, transitions)
+
+    final_states = {last_state(states)}
+
+    return NFA(
+            states=states,
+            input_symbols=input_symbols,
+            transitions=transitions,
+            initial_state=initial_state,
+            final_states=final_states
+            )
+
+def DFA_name_reset(L):
+    print("Number of states before minify: {}".format(len(L.states)))
+    L = L.minify()
+    m = dict()
+    for x in sorted(L.states):
+        m[x] = str(len(m))
+    #print("DFA name reset:")
+    #print("Before:\n{}\n{}\n{}".format(L.states, L.transitions, L.final_states))
+    #print("After:\n{}".format({m[x] for x in L.states}))# {m[x]:{k:m[v] for k,v in L.transitions[x].items()} for x in L.transitions}, {m[x] for x in L.final_states}))
+    L = DFA(
+            states={m[x] for x in L.states},
+            input_symbols=L.input_symbols,
+            transitions={m[x]:{k:m[v] for k,v in L.transitions[x].items()} for x in L.transitions},
+            initial_state=m[L.initial_state],
+            final_states={m[x] for x in L.final_states}
+            )
+    return L
+
+def make_DFA_for_M() -> "DFA":
+    return DFA(
+            states={"0","1","2","3"},
+            input_symbols=set(DIRS),
+            transitions={"0":{"U":"1", "D":"1", "L":"2", "R":"2"},
+                         "1":{"U":"3", "D":"3", "L":"2", "R":"2"},
+                         "2":{"U":"1", "D":"1", "L":"3", "R":"3"},
+                         "3":{"U":"3", "D":"3", "L":"3", "R":"3"}},
+            initial_state="0",
+            final_states={"0", "1", "2"}
+            )
+
+def make_DFA_for_pinword(u: str) -> "DFA":
+    print("Creating DFA for pinword: {}".format(u))
+    return DFA_name_reset(DFA.from_nfa(make_NFA_for_pinword(u)))
+
+def make_DFA_for_perm(perm: "Perm") -> "DFA":
+    print("Creating DFA for permutation: {}".format(perm))
+    pinwords = perm_to_pinword_mapping(len(perm))[perm]
+    print("Total number of pinwords: {}".format(len(pinwords)))
+    L = None
+    for i,u in enumerate(sorted(pinwords)):
+        if L is None:
+            L = make_DFA_for_pinword(u)
+        else:
+            L2 = make_DFA_for_pinword(u)
+            print("Computing union")
+            U = L.union(L2)
+            L = DFA_name_reset(U)
+        
+        print("Current number of states: {}".format(len(L.states)))
+    return L
+
+def make_DFA_for_basis(B: List["Perm"]) -> "DFA":
+    print("Creating DFA for basis: {}".format(B))
+    L = None
+    for perm in B:
+        if L is None:
+            L = make_DFA_for_perm(perm)
+        else:
+            L = DFA_name_reset(L.union(make_DFA_for_perm(perm)))
+    L = L.complement()
+    L = DFA_name_reset(make_DFA_for_M().intersect(L))
+    return L
+
+def test_DFA_finiteness(L: "DFA") -> bool:
+    print("States")
+    print(sorted(L.states))
+    print()
+    print("Transitions")
+    for state in sorted(L.states):
+        print(state, sorted(L.transitions[state].items()))
+    print()
+    print("Final states")
+    print(sorted(L.final_states))
+
+
+
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
-    for k,v in perm_to_pinword_mapping(3).items():
-        print(k, v)
-    print()
-    for k,v in perm_to_strict_pinword_mapping(3).items():
-        print(k, v)
     
+    
+    basis = (Perm((0,1,2)), Perm((1,0,3,2)), Perm((2,1,3,0)))
+    L = make_DFA_for_basis(basis)
+    test_DFA_finiteness(L)
