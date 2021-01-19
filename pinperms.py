@@ -7,6 +7,8 @@ from collections import defaultdict
 from fractions import Fraction
 from functools import lru_cache
 from permuta import *
+from tqdm import tqdm
+
 
 from typing import (
     TYPE_CHECKING,
@@ -375,7 +377,6 @@ def make_NFA_for_pinword(u: str) -> "NFA":
             )
 
 def DFA_name_reset(L):
-    print("Number of states before minify: {}".format(len(L.states)))
     L = L.minify()
     m = dict()
     for x in sorted(L.states):
@@ -405,56 +406,101 @@ def make_DFA_for_M() -> "DFA":
             )
 
 def make_DFA_for_pinword(u: str) -> "DFA":
-    print("Creating DFA for pinword: {}".format(u))
+    #print("    Creating DFA for pinword: {}".format(u))
     return DFA_name_reset(DFA.from_nfa(make_NFA_for_pinword(u)))
 
-def make_DFA_for_perm(perm: "Perm") -> "DFA":
-    print("Creating DFA for permutation: {}".format(perm))
-    pinwords = perm_to_pinword_mapping(len(perm))[perm]
+#def make_DFA_for_perm(perm: "Perm") -> "DFA":
+def make_DFA_for_basis(B: List["Perm"]) -> "DFA":
+    print("Creating DFA for basis: {}".format(B))
+    pinwords = pinwords_for_basis(B)
     print("Total number of pinwords: {}".format(len(pinwords)))
     L = None
-    for i,u in enumerate(sorted(pinwords)):
+    for u in tqdm(sorted(pinwords)):
         if L is None:
             L = make_DFA_for_pinword(u)
         else:
             L2 = make_DFA_for_pinword(u)
-            print("Computing union")
+            #print("  Computing union")
             U = L.union(L2)
+            #print("  Number of states before minify: {}".format(len(U.states)))
             L = DFA_name_reset(U)
         
-        print("Current number of states: {}".format(len(L.states)))
-    return L
-
-def make_DFA_for_basis(B: List["Perm"]) -> "DFA":
-    print("Creating DFA for basis: {}".format(B))
-    L = None
-    for perm in B:
-        if L is None:
-            L = make_DFA_for_perm(perm)
-        else:
-            L = DFA_name_reset(L.union(make_DFA_for_perm(perm)))
+        #print("  Current number of states: {}".format(len(L.states)))
     L = L.complement()
     L = DFA_name_reset(make_DFA_for_M().intersect(L))
     return L
 
-def test_DFA_finiteness(L: "DFA") -> bool:
-    print("States")
-    print(sorted(L.states))
-    print()
-    print("Transitions")
-    for state in sorted(L.states):
-        print(state, sorted(L.transitions[state].items()))
-    print()
-    print("Final states")
-    print(sorted(L.final_states))
+def pinwords_for_basis(B):
+    res = []
+    for perm in B:
+        res.extend(perm_to_pinword_mapping(len(perm))[perm])
+    return res
+
+def make_graph(L: "DFA") -> dict:
+    G = defaultdict(set)
+    for k,v in L.transitions.items():
+        for c,u in v.items():
+            G[k].add(u)
+    return G
+
+def reverse_graph(G: dict) -> dict:
+    rev_G = defaultdict(set)
+    for k,v in G.items():
+        for u in v:
+            rev_G[u].add(k)
+    return rev_G
+
+def reachable_nodes(G: dict, v: str, vis = None) -> set:
+    if vis == None:
+        vis = set()
+    if v not in vis:
+        vis.add(v)
+        for u in G[v]:
+            reachable_nodes(G, u, vis)
 
 
+def constrain_graph(G: dict, V: Set[str]) -> dict:
+    return {k:{x for x in G[k] if x in V} for k in G if k in V}
+
+def has_cycle(G: dict) -> bool:
+    def dfs(G, at, vis, stack):
+        if at not in vis:
+            vis.add(at)
+            stack.add(at)
+            for k in G[at]:
+                if k not in vis and dfs(G, k, vis, stack):
+                    return True
+                elif k in stack:
+                    return True
+            stack.remove(at)
+        return False
+    vis = set()
+    stack = set()
+    return any(dfs(G, k, vis, stack) for k in G)
+
+def is_finite_language(L: "DFA") -> bool:
+    G = make_graph(L)
+    rev_G = reverse_graph(G)
+    
+    accessible_nodes = set()
+    reachable_nodes(G, L.initial_state, accessible_nodes)
+    coaccessible_nodes = set()
+    for state in L.final_states:
+        reachable_nodes(rev_G, state, coaccessible_nodes)
+    
+    important_nodes = accessible_nodes.intersection(coaccessible_nodes)
+    
+    constrained_G = constrain_graph(G, important_nodes)
+    
+    contains_cycle = has_cycle(constrained_G)
+    
+    return not contains_cycle
 
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
     
-    
-    basis = (Perm((0,1,2)), Perm((1,0,3,2)), Perm((2,1,3,0)))
+    basis = (Perm((0,2,1,3)), Perm((1,3,0,2)), Perm((1,3,2,0)))
+    basis = (Perm((1,3,0,2)),Perm((2,0,3,1)))
     L = make_DFA_for_basis(basis)
-    test_DFA_finiteness(L)
+    print(is_finite_language(L))
