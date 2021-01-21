@@ -6,7 +6,9 @@ from bisect import bisect_left
 from collections import defaultdict
 from fractions import Fraction
 from functools import lru_cache
+from pathlib import Path
 from permuta import *
+from permuta.permutils import all_symmetry_sets
 from tqdm import tqdm
 
 
@@ -409,25 +411,59 @@ def make_DFA_for_pinword(u: str) -> "DFA":
     #print("    Creating DFA for pinword: {}".format(u))
     return DFA_name_reset(DFA.from_nfa(make_NFA_for_pinword(u)))
 
-#def make_DFA_for_perm(perm: "Perm") -> "DFA":
-def make_DFA_for_basis(B: List["Perm"]) -> "DFA":
-    print("Creating DFA for basis: {}".format(B))
-    pinwords = pinwords_for_basis(B)
-    print("Total number of pinwords: {}".format(len(pinwords)))
+def make_DFA_for_perm(perm: "Perm", verbose: bool=False) -> "DFA":
+    if verbose:
+        sys.stderr.write(("Creating DFA for perm: {}\n".format(perm)))
+    pinwords = pinwords_for_basis((perm,))
     L = None
-    for u in tqdm(sorted(pinwords)):
+    t = sorted(pinwords)
+    if verbose:
+        t = tqdm(t)
+    for u in t:
         if L is None:
             L = make_DFA_for_pinword(u)
         else:
             L2 = make_DFA_for_pinword(u)
             #print("  Computing union")
             U = L.union(L2)
-            #print("  Number of states before minify: {}".format(len(U.states)))
+            if verbose:
+                t.set_postfix({'num_states':len(U.states)})
+                #print("  Number of states before minify: {}".format(len(U.states)))
             L = DFA_name_reset(U)
+        if verbose:
+            t.set_postfix({'num_states':len(L.states)})
+    return L
+
+def make_DFA_for_basis(B: List["Perm"], verbose: bool=False) -> "DFA":
+    if verbose:
+        print("Creating DFA for basis: {}".format(B))
+    pinwords = pinwords_for_basis(B)
+    if verbose:
+        print("Total number of pinwords: {}".format(len(pinwords)))
+    L = None
+    t = sorted(pinwords)
+    if verbose:
+        t = tqdm(t)
+    for u in t:
+        if L is None:
+            L = make_DFA_for_pinword(u)
+        else:
+            L2 = make_DFA_for_pinword(u)
+            #print("  Computing union")
+            U = L.union(L2)
+            if verbose:
+                t.set_postfix({'num_states':len(U.states)})
+                #print("  Number of states before minify: {}".format(len(U.states)))
+            L = DFA_name_reset(U)
+        if verbose:
+            t.set_postfix({'num_states':len(L.states)})
         
         #print("  Current number of states: {}".format(len(L.states)))
     L = L.complement()
     L = DFA_name_reset(make_DFA_for_M().intersect(L))
+    if verbose:
+        print("Final state machine size: {}".format(len(L.states)))
+        print(repr(L))
     return L
 
 def pinwords_for_basis(B):
@@ -496,11 +532,75 @@ def is_finite_language(L: "DFA") -> bool:
     
     return not contains_cycle
 
+def has_finite_alternations(B):
+    alt_B = (Perm((0,1,2)), Perm((1,3,0,2)), Perm((2,3,0,1)))
+    for sym in all_symmetry_sets(alt_B):
+        if all(x not in Av(sym) for x in B):
+            return False
+    return True
+
+def has_finite_wedges_type_1(B):
+    wedge1_B = (Perm((0,1,3,2)), Perm((0,2,1,3)), Perm((0,3,1,2)), Perm((0,3,2,1)),
+                Perm((1,3,2,0)), Perm((2,0,1,3)), Perm((3,0,1,2)), Perm((3,0,2,1)),
+                Perm((3,1,2,0)), Perm((3,2,0,1)))
+    for sym in all_symmetry_sets(wedge1_B):
+        if all(x not in Av(sym) for x in B):
+            return False
+    return True
+
+def has_finite_wedges_type_2(B):
+    wedge2_B = (Perm((1,0,2,3)), Perm((1,0,3,2)), Perm((2,0,1,3)), Perm((2,0,3,1)),
+                Perm((2,1,3,0)), Perm((2,3,0,1)), Perm((3,0,1,2)), Perm((3,0,2,1)),
+                Perm((3,1,2,0)), Perm((3,2,0,1)))
+    for sym in all_symmetry_sets(wedge2_B):
+        if all(x not in Av(sym) for x in B):
+            return False
+    return True
+
+def has_finite_pinperms(B):
+    L = make_DFA_for_basis(B, True)
+    return is_finite_language(L)
+
+def has_finite_simples(B):
+    alt = has_finite_alternations(B)
+    if not alt:
+        return False
+    wedge1 = has_finite_wedges_type_1(B)
+    if not wedge1:
+        return False
+    wedge2 = has_finite_wedges_type_2(B)
+    if not wedge2:
+        return False
+    pin = has_finite_pinperms(B)
+    return pin
+
+def store_DFA_for_perm(perm, verbose=False):
+    directory = "dfa_db/S{}/".format(len(perm))
+    p = Path(directory)
+    p.mkdir(parents=True, exist_ok=True)
+    filename = "{}.txt".format(''.join(str(i) for i in perm))
+    p = p / filename
+    if p.is_file():
+        if verbose:
+            sys.stderr.write("File {} already exists".format(p))
+        return
+    L = make_DFA_for_perm(perm, verbose)
+    with (str(p), "w") as f:
+        f.write("{}\n".format(repr(L)))
+
+def create_DFA_DB_for_length(n, verbose=False):
+    for perm in Perm.of_length(n):
+        store_DFA_for_perm(perm, verbose)
+
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
     
-    basis = (Perm((0,2,1,3)), Perm((1,3,0,2)), Perm((1,3,2,0)))
-    basis = (Perm((1,3,0,2)),Perm((2,0,3,1)))
-    L = make_DFA_for_basis(basis)
-    print(is_finite_language(L))
+    #basis = (Perm((0,2,1,3)), Perm((1,3,0,2)), Perm((1,3,2,0)))
+    #basis = (Perm((1,3,0,2)),Perm((2,0,3,1)))
+    #basis = (Perm((0,2,3,1)),Perm((1,3,0,2)))
+    #L = make_DFA_for_basis(basis, True)
+    #print(is_finite_language(L))
+    #print(has_finite_simples(basis))
+    for i in range(1,2):
+        create_DFA_DB_for_length(i, True)
