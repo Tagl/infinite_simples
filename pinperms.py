@@ -434,7 +434,7 @@ def make_DFA_for_perm(perm: "Perm", verbose: bool=False) -> "DFA":
             t.set_postfix({'num_states':len(L.states)})
     return L
 
-def make_DFA_for_basis(B: List["Perm"], verbose: bool=False) -> "DFA":
+def make_DFA_for_basis_from_pinwords(B: List["Perm"], verbose: bool=False) -> "DFA":
     if verbose:
         print("Creating DFA for basis: {}".format(B))
     pinwords = pinwords_for_basis(B)
@@ -465,6 +465,43 @@ def make_DFA_for_basis(B: List["Perm"], verbose: bool=False) -> "DFA":
         print("Final state machine size: {}".format(len(L.states)))
         print(repr(L))
     return L
+
+def make_DFA_for_basis_from_db(B: List["Perm"], verbose: bool=False) -> "DFA":
+    if verbose:
+        print("Creating DFA for basis: {}".format(B))
+    if verbose:
+        print("Total number of permutations: {}".format(len(B)))
+    L = None
+    t = sorted(B)
+    if verbose:
+        t = tqdm(t)
+    for u in t:
+        if L is None:
+            L = load_DFA_for_perm(u, verbose)
+        else:
+            L2 = load_DFA_for_perm(u, verbose)
+            #print("  Computing union")
+            U = L.union(L2)
+            if verbose:
+                t.set_postfix({'num_states':len(U.states)})
+                #print("  Number of states before minify: {}".format(len(U.states)))
+            L = DFA_name_reset(U)
+        if verbose:
+            t.set_postfix({'num_states':len(L.states)})
+        
+        #print("  Current number of states: {}".format(len(L.states)))
+    L = L.complement()
+    L = DFA_name_reset(make_DFA_for_M().intersect(L))
+    if verbose:
+        print("Final state machine size: {}".format(len(L.states)))
+        print(repr(L))
+    return L
+
+def make_DFA_for_basis(B: List["Perm"], verbose: bool=False, use_db=False) -> "DFA":
+    if use_db:
+        return make_DFA_for_basis_from_db(B, verbose)
+    else:
+        return make_DFA_for_basis_from_pinwords(B, verbose)
 
 def pinwords_for_basis(B):
     res = []
@@ -557,11 +594,11 @@ def has_finite_wedges_type_2(B):
             return False
     return True
 
-def has_finite_pinperms(B):
-    L = make_DFA_for_basis(B, True)
+def has_finite_pinperms(B, verbose=False, use_db=False):
+    L = make_DFA_for_basis(B, verbose, use_db)
     return is_finite_language(L)
 
-def has_finite_simples(B):
+def has_finite_simples(B, verbose=False, use_db=False):
     alt = has_finite_alternations(B)
     if not alt:
         return False
@@ -571,10 +608,10 @@ def has_finite_simples(B):
     wedge2 = has_finite_wedges_type_2(B)
     if not wedge2:
         return False
-    pin = has_finite_pinperms(B)
+    pin = has_finite_pinperms(B, verbose, use_db)
     return pin
 
-def store_DFA_for_perm(perm, verbose=False):
+def store_DFA_for_perm(perm, verbose=False, L=None):
     directory = "dfa_db/S{}/".format(len(perm))
     p = Path(directory)
     p.mkdir(parents=True, exist_ok=True)
@@ -582,11 +619,28 @@ def store_DFA_for_perm(perm, verbose=False):
     p = p / filename
     if p.is_file():
         if verbose:
-            sys.stderr.write("File {} already exists".format(p))
+            sys.stderr.write("File {} already exists\n".format(p))
         return
-    L = make_DFA_for_perm(perm, verbose)
-    with (str(p), "w") as f:
+    if L == None:
+        L = make_DFA_for_perm(perm, verbose)
+    with open(str(p), "w") as f:
+        sys.stderr.write("Writing to file {}\n".format(p))
         f.write("{}\n".format(repr(L)))
+
+def load_DFA_for_perm(perm, verbose=False):
+    directory = "dfa_db/S{}/".format(len(perm))
+    p = Path(directory)
+    filename = "{}.txt".format(''.join(str(i) for i in perm))
+    p = p / filename
+    L = None
+    if not p.is_file():
+        store_DFA_for_perm(perm, verbose)
+    if verbose:
+        sys.stderr.write("Reading from file {}\n".format(p))
+    with open(str(p), "r") as f:
+        # TODO: avoid eval
+        L = eval(f.readline().strip())
+    return L
 
 def create_DFA_DB_for_length(n, verbose=False):
     for perm in Perm.of_length(n):
@@ -596,11 +650,11 @@ if __name__ == "__main__":
     import doctest
     doctest.testmod()
     
-    #basis = (Perm((0,2,1,3)), Perm((1,3,0,2)), Perm((1,3,2,0)))
+    basis = (Perm((0,2,1,3)), Perm((1,3,0,2)), Perm((1,3,2,0)))
     #basis = (Perm((1,3,0,2)),Perm((2,0,3,1)))
     #basis = (Perm((0,2,3,1)),Perm((1,3,0,2)))
     #L = make_DFA_for_basis(basis, True)
     #print(is_finite_language(L))
     #print(has_finite_simples(basis))
-    for i in range(1,2):
-        create_DFA_DB_for_length(i, True)
+    #create_DFA_DB_for_length(i, True)
+    print(make_DFA_for_basis_from_db(basis))
