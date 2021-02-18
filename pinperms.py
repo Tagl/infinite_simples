@@ -3,12 +3,12 @@ import sys
 from automata.fa.dfa import DFA
 from automata.fa.nfa import NFA
 from bisect import bisect_left
-from collections import defaultdict
+from collections import defaultdict, deque
 from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
 from permuta import *
-from permuta.permutils import all_symmetry_sets
+from permuta.permutils import all_symmetry_sets, lex_min
 from tqdm import tqdm
 
 
@@ -436,13 +436,13 @@ def make_DFA_for_perm(perm: "Perm", verbose: bool=False) -> "DFA":
 
 def make_DFA_for_basis_from_pinwords(B: List["Perm"], verbose: bool=False) -> "DFA":
     if verbose:
-        print("Creating DFA for basis: {}".format(B))
+        sys.stderr.write("Creating DFA for basis: {}\n".format(B))
     pinwords = pinwords_for_basis(B)
     if verbose:
-        print("Total number of pinwords: {}".format(len(pinwords)))
+        sys.stderr.write("Total number of pinwords: {}\n".format(len(pinwords)))
     L = None
     t = sorted(pinwords)
-    if verbose:
+    if not verbose:
         t = tqdm(t)
     for u in t:
         if L is None:
@@ -451,29 +451,26 @@ def make_DFA_for_basis_from_pinwords(B: List["Perm"], verbose: bool=False) -> "D
             L2 = make_DFA_for_pinword(u)
             #print("  Computing union")
             U = L.union(L2)
-            if verbose:
+            if not verbose:
                 t.set_postfix({'num_states':len(U.states)})
                 #print("  Number of states before minify: {}".format(len(U.states)))
             L = DFA_name_reset(U)
-        if verbose:
+        if not verbose:
             t.set_postfix({'num_states':len(L.states)})
         
         #print("  Current number of states: {}".format(len(L.states)))
-    L = L.complement()
-    L = DFA_name_reset(make_DFA_for_M().intersect(L))
     if verbose:
-        print("Final state machine size: {}".format(len(L.states)))
-        print(repr(L))
+        sys.stderr.write("Final state machine size: {}\n".format(len(L.states)))
     return L
 
 def make_DFA_for_basis_from_db(B: List["Perm"], verbose: bool=False) -> "DFA":
     if verbose:
-        print("Creating DFA for basis: {}".format(B))
+        sys.stderr.write("Creating DFA for basis: {}\n".format(B))
     if verbose:
-        print("Total number of permutations: {}".format(len(B)))
+        sys.stderr.write("Total number of permutations: {}\n".format(len(B)))
     L = None
     t = sorted(B)
-    if verbose:
+    if not verbose:
         t = tqdm(t)
     for u in t:
         if L is None:
@@ -482,19 +479,16 @@ def make_DFA_for_basis_from_db(B: List["Perm"], verbose: bool=False) -> "DFA":
             L2 = load_DFA_for_perm(u, verbose)
             #print("  Computing union")
             U = L.union(L2)
-            if verbose:
+            if not verbose:
                 t.set_postfix({'num_states':len(U.states)})
                 #print("  Number of states before minify: {}".format(len(U.states)))
             L = DFA_name_reset(U)
-        if verbose:
+        if not verbose:
             t.set_postfix({'num_states':len(L.states)})
         
         #print("  Current number of states: {}".format(len(L.states)))
-    L = L.complement()
-    L = DFA_name_reset(make_DFA_for_M().intersect(L))
     if verbose:
-        print("Final state machine size: {}".format(len(L.states)))
-        print(repr(L))
+        sys.stderr.write("Final state machine size: {}\n".format(len(L.states)))
     return L
 
 def make_DFA_for_basis(B: List["Perm"], verbose: bool=False, use_db=False) -> "DFA":
@@ -551,7 +545,9 @@ def has_cycle(G: dict) -> bool:
     stack = set()
     return any(dfs(G, k, vis, stack) for k in G)
 
-def is_finite_language(L: "DFA") -> bool:
+def is_finite_language(L: "DFA", verbose=False) -> bool:
+    if verbose:
+        sys.stderr.write("Checking if DFA of size {} has finite language".format(len(L.states)))
     G = make_graph(L)
     rev_G = reverse_graph(G)
     
@@ -594,11 +590,7 @@ def has_finite_wedges_type_2(B):
             return False
     return True
 
-def has_finite_pinperms(B, verbose=False, use_db=False):
-    L = make_DFA_for_basis(B, verbose, use_db)
-    return is_finite_language(L)
-
-def has_finite_simples(B, verbose=False, use_db=False):
+def has_finite_special_simples(B):
     alt = has_finite_alternations(B)
     if not alt:
         return False
@@ -608,8 +600,21 @@ def has_finite_simples(B, verbose=False, use_db=False):
     wedge2 = has_finite_wedges_type_2(B)
     if not wedge2:
         return False
+    return True
+
+def has_finite_pinperms(B, verbose=False, use_db=False, L=None):
+    if L == None:
+        L = make_DFA_for_basis(B, verbose, use_db)
+    L = L.complement()
+    L = DFA_name_reset(make_DFA_for_M().intersect(L))
+    return is_finite_language(L)
+
+def has_finite_simples(B, verbose=False, use_db=False, check_all=False, L=None):
+    other = has_finite_special_simples(B)
+    if not check_all and not other:
+        return False
     pin = has_finite_pinperms(B, verbose, use_db)
-    return pin
+    return pin and other
 
 def store_DFA_for_perm(perm, verbose=False, L=None):
     directory = "dfa_db/S{}/".format(len(perm))
@@ -646,15 +651,46 @@ def create_DFA_DB_for_length(n, verbose=False):
     for perm in Perm.of_length(n):
         store_DFA_for_perm(perm, verbose)
 
+def all_classes_with_infinite_simples(n):
+    finite = dict()
+    perms = list(Perm.of_length(n))
+    q = deque()
+    for p in perms:
+        cur = (p,)
+        if cur != lex_min(cur):
+            continue
+        L = load_DFA_for_perm(p)
+        q.append((cur, L))
+        val = has_finite_special_simples(cur) and has_finite_pinperms(cur, L=L)
+        finite[cur] = val
+        if val == False:
+            yield cur
+
+    while len(q) > 0:
+        cur,L = q.popleft()
+        sys.stderr.write("{}\n".format(cur))
+        for p in tqdm(perms):
+            if p in cur:
+                continue
+            nxt = tuple(sorted(cur + (p,)))
+            if nxt != lex_min(nxt):
+                continue
+            if nxt not in finite:
+                nxtL = DFA_name_reset(L.union(load_DFA_for_perm(p)))
+                val = has_finite_special_simples(nxt) and has_finite_pinperms(nxt, L=nxtL)
+                finite[nxt] = val
+                if val == False:
+                    yield nxt
+                    q.append((nxt, nxtL))
+
+    #return {k for k in finite.keys() if finite[k] == False}
+
+
+
 if __name__ == "__main__":
-    import doctest
-    doctest.testmod()
+    #import doctest
+    #doctest.testmod()
+    n = 4
     
-    basis = (Perm((0,2,1,3)), Perm((1,3,0,2)), Perm((1,3,2,0)))
-    #basis = (Perm((1,3,0,2)),Perm((2,0,3,1)))
-    #basis = (Perm((0,2,3,1)),Perm((1,3,0,2)))
-    #L = make_DFA_for_basis(basis, True)
-    #print(is_finite_language(L))
-    #print(has_finite_simples(basis))
-    #create_DFA_DB_for_length(i, True)
-    print(make_DFA_for_basis_from_db(basis))
+    for basis in all_classes_with_infinite_simples(n):
+        print('_'.join(''.join(str(d) for d in p) for p in basis), flush=True)
